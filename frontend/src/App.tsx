@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-const WORK_SECONDS = 2 * 60
+const WORK_SECONDS = 25 * 60
 const BREAK_SECONDS = 5 * 60
 const API = 'https://pomodoro-app-qi8p.onrender.com'
 

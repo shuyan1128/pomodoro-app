@@ -15,9 +15,11 @@ type Task struct {
 }
 
 var (
-	tasks  []Task
-	nextID = 1
-	mu     sync.Mutex
+	tasks       []Task
+	nextID      = 1
+	dailyTasks  []Task
+	dailyNextID = 1
+	mu          sync.Mutex
 )
 
 var allowedOrigins = map[string]bool{
@@ -103,9 +105,73 @@ func handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func handleDailyTasks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		mu.Lock()
+		out := dailyTasks
+		if out == nil {
+			out = []Task{}
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+
+	case http.MethodPost:
+		var body struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Text == "" {
+			http.Error(w, `{"error":"text is required"}`, http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		t := Task{ID: dailyNextID, Text: body.Text}
+		dailyNextID++
+		dailyTasks = append(dailyTasks, t)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(t)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleDailyTaskByID(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/daily-tasks/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	mu.Lock()
+	found := false
+	for i, t := range dailyTasks {
+		if t.ID == id {
+			dailyTasks = append(dailyTasks[:i], dailyTasks[i+1:]...)
+			found = true
+			break
+		}
+	}
+	mu.Unlock()
+	if !found {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	http.HandleFunc("/tasks", corsMiddleware(handleTasks))
 	http.HandleFunc("/tasks/", corsMiddleware(handleTaskByID))
+	http.HandleFunc("/daily-tasks", corsMiddleware(handleDailyTasks))
+	http.HandleFunc("/daily-tasks/", corsMiddleware(handleDailyTaskByID))
 	log.Println("Server running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-const WORK_SECONDS = 25 * 60
+const WORK_SECONDS = 2 * 60
 const BREAK_SECONDS = 5 * 60
 const API = 'https://pomodoro-app-qi8p.onrender.com'
 
@@ -47,9 +47,41 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [input, setInput] = useState('')
   const [adding, setAdding] = useState(false)
+  const [dailyTasks, setDailyTasks] = useState<Task[]>([])
+  const [dailyInput, setDailyInput] = useState('')
+  const [dailyAdding, setDailyAdding] = useState(false)
+  const [dragOverFocus, setDragOverFocus] = useState(false)
   const [exercises, setExercises] = useState<string[]>([])
   const secondsRef = useRef(WORK_SECONDS)
   const modeRef = useRef<'focus' | 'break'>('focus')
+  const startTimeRef = useRef<number>(0)
+
+  useEffect(() => {
+    const savedStartTime = localStorage.getItem('pomodoro_startTime')
+    const savedMode = localStorage.getItem('pomodoro_mode') as 'focus' | 'break' | null
+    if (savedStartTime && savedMode) {
+      const startTime = Number(savedStartTime)
+      const totalSeconds = savedMode === 'focus' ? WORK_SECONDS : BREAK_SECONDS
+      const remaining = totalSeconds - Math.floor((Date.now() - startTime) / 1000)
+      if (remaining > 0) {
+        modeRef.current = savedMode
+        secondsRef.current = remaining
+        setMode(savedMode)
+        setSecondsLeft(remaining)
+        setRunning(true)
+      } else {
+        localStorage.removeItem('pomodoro_startTime')
+        localStorage.removeItem('pomodoro_mode')
+        const nextMode = savedMode === 'focus' ? 'break' : 'focus'
+        const nextSeconds = nextMode === 'focus' ? WORK_SECONDS : BREAK_SECONDS
+        modeRef.current = nextMode
+        secondsRef.current = nextSeconds
+        setMode(nextMode)
+        setSecondsLeft(nextSeconds)
+        if (nextMode === 'break') setExercises(pickExercises())
+      }
+    }
+  }, [])
 
   useEffect(() => {
     fetch(`${API}/tasks`)
@@ -61,11 +93,27 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    fetch(`${API}/daily-tasks`)
+      .then(r => r.json())
+      .then((data: Omit<Task, 'completed'>[]) =>
+        setDailyTasks(data.map(t => ({ ...t, completed: false })))
+      )
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (!running) return
+    const totalSeconds = modeRef.current === 'focus' ? WORK_SECONDS : BREAK_SECONDS
+    startTimeRef.current = Date.now() - (totalSeconds - secondsRef.current) * 1000
+    localStorage.setItem('pomodoro_startTime', String(startTimeRef.current))
+    localStorage.setItem('pomodoro_mode', modeRef.current)
+
     const id = setInterval(() => {
-      const next = secondsRef.current - 1
+      const next = totalSeconds - Math.floor((Date.now() - startTimeRef.current) / 1000)
       if (next <= 0) {
         clearInterval(id)
+        localStorage.removeItem('pomodoro_startTime')
+        localStorage.removeItem('pomodoro_mode')
         playDing()
         const nextMode = modeRef.current === 'focus' ? 'break' : 'focus'
         const nextSeconds = nextMode === 'focus' ? WORK_SECONDS : BREAK_SECONDS
@@ -86,7 +134,19 @@ export default function App() {
   const minutes = String(Math.floor(secondsLeft / 60)).padStart(2, '0')
   const seconds = String(secondsLeft % 60).padStart(2, '0')
 
+  function toggleRunning() {
+    setRunning(r => {
+      if (r) {
+        localStorage.removeItem('pomodoro_startTime')
+        localStorage.removeItem('pomodoro_mode')
+      }
+      return !r
+    })
+  }
+
   function reset() {
+    localStorage.removeItem('pomodoro_startTime')
+    localStorage.removeItem('pomodoro_mode')
     setRunning(false)
     setMode('focus')
     modeRef.current = 'focus'
@@ -127,6 +187,56 @@ export default function App() {
     }
   }
 
+  async function addDailyTask() {
+    const text = dailyInput.trim()
+    if (!text || dailyAdding) return
+    setDailyAdding(true)
+    try {
+      const res = await fetch(`${API}/daily-tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+      const task: Task = { ...(await res.json()), completed: false }
+      setDailyTasks(t => [...t, task])
+      setDailyInput('')
+    } catch {
+      // backend unreachable
+    } finally {
+      setDailyAdding(false)
+    }
+  }
+
+  async function deleteDailyTask(id: number) {
+    setDailyTasks(t => t.filter(task => task.id !== id))
+    try {
+      await fetch(`${API}/daily-tasks/${id}`, { method: 'DELETE' })
+    } catch {
+      // backend unreachable
+    }
+  }
+
+  async function dropOnFocus(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOverFocus(false)
+    const id = Number(e.dataTransfer.getData('dailyTaskId'))
+    const daily = dailyTasks.find(t => t.id === id)
+    if (!daily) return
+    setDailyTasks(dt => dt.filter(t => t.id !== id))
+    try {
+      const res = await fetch(`${API}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: daily.text }),
+      })
+      const newTask: Task = { ...(await res.json()), completed: false }
+      setTasks(t => [...t, newTask])
+      await fetch(`${API}/daily-tasks/${id}`, { method: 'DELETE' })
+    } catch {
+      setDailyTasks(dt => [...dt, daily])
+    }
+  }
+
   return (
     <div style={styles.page}>
       <h1 style={styles.title}>ysy's studio... 🫧 </h1>
@@ -141,7 +251,7 @@ export default function App() {
         <div style={styles.controls}>
           <button
             style={{ ...styles.btn, ...(running ? styles.btnSecondary : styles.btnPrimary) }}
-            onClick={() => setRunning(r => !r)}
+            onClick={toggleRunning}
             disabled={secondsLeft === 0}
           >
             {running ? 'Pause' : 'Start'}
@@ -166,44 +276,92 @@ export default function App() {
         </div>
       )}
 
-      {/* Task list */}
-      <div style={styles.taskCard}>
-        <h2 style={styles.sectionTitle}> TO DOS 💪</h2>
-        <div style={styles.inputRow}>
-          <input
-            style={styles.input}
-            placeholder="Add a task..."
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addTask()}
-          />
-          <button
-            style={{ ...styles.btn, ...styles.btnPrimary, opacity: adding ? 0.6 : 1 }}
-            onClick={addTask}
-            disabled={adding}
-          >
-            {adding ? '…' : 'Add'}
-          </button>
+      {/* Two-column task layout */}
+      <div style={styles.columns}>
+        {/* Focus tasks */}
+        <div
+          style={{ ...styles.taskCard, ...styles.column, ...(dragOverFocus ? styles.dropTarget : {}) }}
+          onDragOver={e => { e.preventDefault(); setDragOverFocus(true) }}
+          onDragLeave={() => setDragOverFocus(false)}
+          onDrop={dropOnFocus}
+        >
+          <h2 style={styles.sectionTitle}>TO DOS 💪</h2>
+          <div style={styles.inputRow}>
+            <input
+              style={styles.input}
+              placeholder="Add a task..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addTask()}
+            />
+            <button
+              style={{ ...styles.btn, ...styles.btnPrimary, ...styles.addBtn, opacity: adding ? 0.6 : 1 }}
+              onClick={addTask}
+              disabled={adding}
+            >
+              {adding ? '…' : '+'}
+            </button>
+          </div>
+          {tasks.length === 0 ? (
+            <p style={styles.empty}>No tasks yet.</p>
+          ) : (
+            <ul style={styles.list}>
+              {tasks.map(task => (
+                <li key={task.id} style={styles.listItem}>
+                  <button style={{ ...styles.checkBtn, color: task.completed ? '#617c34' : '#ccc' }} onClick={() => toggleTask(task.id)}>
+                    ✓
+                  </button>
+                  <span style={{ ...styles.taskText, textDecoration: task.completed ? 'line-through' : 'none', color: task.completed ? '#aaa' : '#2c2c2c' }}>
+                    {task.text}
+                  </span>
+                  <button style={styles.deleteBtn} onClick={() => deleteTask(task.id)}>
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        {tasks.length === 0 ? (
-          <p style={styles.empty}>No tasks yet.</p>
-        ) : (
-          <ul style={styles.list}>
-            {tasks.map(task => (
-              <li key={task.id} style={styles.listItem}>
-                <button style={{ ...styles.checkBtn, color: task.completed ? '#617c34' : '#ccc' }} onClick={() => toggleTask(task.id)}>
-                  ✓
-                </button>
-                <span style={{ ...styles.taskText, textDecoration: task.completed ? 'line-through' : 'none', color: task.completed ? '#aaa' : '#2c2c2c' }}>
-                  {task.text}
-                </span>
-                <button style={styles.deleteBtn} onClick={() => deleteTask(task.id)}>
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+
+        {/* Daily tasks */}
+        <div style={{ ...styles.taskCard, ...styles.column }}>
+          <h2 style={styles.sectionTitle}>DAILY 🌿</h2>
+          <div style={styles.inputRow}>
+            <input
+              style={styles.input}
+              placeholder="Add a daily task..."
+              value={dailyInput}
+              onChange={e => setDailyInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addDailyTask()}
+            />
+            <button
+              style={{ ...styles.btn, ...styles.btnPrimary, ...styles.addBtn, opacity: dailyAdding ? 0.6 : 1 }}
+              onClick={addDailyTask}
+              disabled={dailyAdding}
+            >
+              {dailyAdding ? '…' : '+'}
+            </button>
+          </div>
+          {dailyTasks.length === 0 ? (
+            <p style={styles.empty}>No daily tasks yet.</p>
+          ) : (
+            <ul style={styles.list}>
+              {dailyTasks.map(task => (
+                <li
+                  key={task.id}
+                  style={{ ...styles.listItem, cursor: 'grab' }}
+                  draggable
+                  onDragStart={e => e.dataTransfer.setData('dailyTaskId', String(task.id))}
+                >
+                  <span style={{ ...styles.taskText, color: '#2c2c2c' }}>{task.text}</span>
+                  <button style={styles.deleteBtn} onClick={() => deleteDailyTask(task.id)}>
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* Spotify */}
@@ -255,7 +413,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
     textAlign: 'center',
     width: '100%',
-    maxWidth: 560,
+    maxWidth: 500,
     marginBottom: 24,
   },
   modeLabel: {
@@ -291,9 +449,30 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#617c34',
     color: '#fff',
   },
+  addBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: '50%',
+    fontSize: 20,
+    padding: 0,
+    flexShrink: 0,
+  },
   btnSecondary: {
     background: '#e8f0d8',
     color: '#617c34',
+  },
+  columns: {
+    display: 'flex',
+    gap: 16,
+    width: '100%',
+    maxWidth: 560,
+    alignItems: 'stretch',
+  },
+  column: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 'none',
+    width: '100%',
   },
   taskCard: {
     background: '#f5f0e3',
@@ -302,6 +481,12 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
     width: '100%',
     maxWidth: 560,
+    boxSizing: 'border-box' as const,
+    overflow: 'hidden',
+  },
+  dropTarget: {
+    outline: '2px dashed #617c34',
+    outlineOffset: -2,
   },
   sectionTitle: {
     fontSize: 18,
@@ -312,11 +497,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   inputRow: {
     display: 'flex',
+    flexWrap: 'wrap' as const,
     gap: 8,
     marginBottom: 16,
   },
   input: {
     flex: 1,
+    minWidth: 0,
     padding: '10px 14px',
     borderRadius: 8,
     border: '0px solid #dcc5de',

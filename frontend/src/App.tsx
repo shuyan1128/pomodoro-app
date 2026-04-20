@@ -1,7 +1,38 @@
 import { useState, useEffect, useRef } from 'react'
 
 const WORK_SECONDS = 25 * 60
+const BREAK_SECONDS = 5 * 60
 const API = 'https://pomodoro-app-qi8p.onrender.com'
+
+function playDing() {
+  const ctx = new AudioContext()
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.type = 'sine'
+  osc.frequency.setValueAtTime(880, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4)
+  gain.gain.setValueAtTime(0.4, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8)
+  osc.start(ctx.currentTime)
+  osc.stop(ctx.currentTime + 0.8)
+}
+
+const EXERCISES = [
+  '🧘 Neck rolls — slowly roll your neck side to side for 30 seconds',
+  '🙆 Shoulder shrugs — raise shoulders to ears, hold 5s, release. Repeat 5x',
+  '🤸 Standing forward fold — stand and reach toward your toes for 30 seconds',
+  '👀 Eye rest — close your eyes and cup them with your palms for 1 minute',
+  '💪 Wrist circles — rotate both wrists 10x each direction',
+  '🚶 Walk around — stand up and take 20 steps anywhere',
+  '🌬️ Deep breathing — inhale 4s, hold 4s, exhale 4s. Repeat 4x',
+]
+
+function pickExercises() {
+  const shuffled = [...EXERCISES].sort(() => Math.random() - 0.5)
+  return shuffled.slice(0, 3)
+}
 
 interface Task {
   id: number
@@ -10,12 +41,15 @@ interface Task {
 }
 
 export default function App() {
+  const [mode, setMode] = useState<'focus' | 'break'>('focus')
   const [secondsLeft, setSecondsLeft] = useState(WORK_SECONDS)
   const [running, setRunning] = useState(false)
   const [tasks, setTasks] = useState<Task[]>([])
   const [input, setInput] = useState('')
   const [adding, setAdding] = useState(false)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [exercises, setExercises] = useState<string[]>([])
+  const secondsRef = useRef(WORK_SECONDS)
+  const modeRef = useRef<'focus' | 'break'>('focus')
 
   useEffect(() => {
     fetch(`${API}/tasks`)
@@ -27,29 +61,36 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (running) {
-      intervalRef.current = setInterval(() => {
-        setSecondsLeft(s => {
-          if (s <= 1) {
-            clearInterval(intervalRef.current!)
-            setRunning(false)
-            return 0
-          }
-          return s - 1
-        })
-      }, 1000)
-    } else {
-      clearInterval(intervalRef.current!)
-    }
-    return () => clearInterval(intervalRef.current!)
+    if (!running) return
+    const id = setInterval(() => {
+      const next = secondsRef.current - 1
+      if (next <= 0) {
+        clearInterval(id)
+        playDing()
+        const nextMode = modeRef.current === 'focus' ? 'break' : 'focus'
+        const nextSeconds = nextMode === 'focus' ? WORK_SECONDS : BREAK_SECONDS
+        modeRef.current = nextMode
+        secondsRef.current = nextSeconds
+        setMode(nextMode)
+        setSecondsLeft(nextSeconds)
+        if (nextMode === 'break') setExercises(pickExercises())
+        setRunning(false)
+      } else {
+        secondsRef.current = next
+        setSecondsLeft(next)
+      }
+    }, 1000)
+    return () => clearInterval(id)
   }, [running])
 
   const minutes = String(Math.floor(secondsLeft / 60)).padStart(2, '0')
   const seconds = String(secondsLeft % 60).padStart(2, '0')
-  const progress = (secondsLeft / WORK_SECONDS) * 100
 
   function reset() {
     setRunning(false)
+    setMode('focus')
+    modeRef.current = 'focus'
+    secondsRef.current = WORK_SECONDS
     setSecondsLeft(WORK_SECONDS)
   }
 
@@ -88,13 +129,13 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>YSY's Focus Time 🍅</h1>
-      <p style={styles.subtitle}>take a breath, you got this ❤️</p>
+      <h1 style={styles.title}>ysy's studio... 🫧 </h1>
+      <p style={styles.subtitle}>there is always hope in the fog, you got this 🌸</p>
 
       {/* Timer */}
       <div style={styles.timerCard}>
-        <div style={styles.progressBar}>
-          <div style={{ ...styles.progressFill, width: `${progress}%` }} />
+        <div style={{ ...styles.modeLabel, color: mode === 'focus' ? '#35431d' : '#35431d' }}>
+          {mode === 'focus' ? '🥥 Focus' : '💖 Break'}
         </div>
         <div style={styles.time}>{minutes}:{seconds}</div>
         <div style={styles.controls}>
@@ -111,9 +152,23 @@ export default function App() {
         </div>
       </div>
 
+      {/* Stretch exercises (break only) */}
+      {mode === 'break' && (
+        <div style={{ ...styles.taskCard, marginBottom: 24 }}>
+          <h2 style={styles.sectionTitle}>🧘 Stretch Break</h2>
+          <ul style={styles.list}>
+            {exercises.map((ex, i) => (
+              <li key={i} style={{ ...styles.listItem, alignItems: 'flex-start' }}>
+                <span style={{ ...styles.taskText, color: '#2c2c2c' }}>{ex}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Task list */}
       <div style={styles.taskCard}>
-        <h2 style={styles.sectionTitle}>Tasks</h2>
+        <h2 style={styles.sectionTitle}> TO DOS 💪</h2>
         <div style={styles.inputRow}>
           <input
             style={styles.input}
@@ -136,7 +191,7 @@ export default function App() {
           <ul style={styles.list}>
             {tasks.map(task => (
               <li key={task.id} style={styles.listItem}>
-                <button style={{ ...styles.checkBtn, color: task.completed ? '#c0392b' : '#ccc' }} onClick={() => toggleTask(task.id)}>
+                <button style={{ ...styles.checkBtn, color: task.completed ? '#617c34' : '#ccc' }} onClick={() => toggleTask(task.id)}>
                   ✓
                 </button>
                 <span style={{ ...styles.taskText, textDecoration: task.completed ? 'line-through' : 'none', color: task.completed ? '#aaa' : '#2c2c2c' }}>
@@ -149,6 +204,18 @@ export default function App() {
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Spotify */}
+      <div style={{ ...styles.taskCard, marginTop: 24 }}>
+        <h2 style={styles.sectionTitle}> PLAYLIST 🎧</h2>
+        <iframe
+          src="https://open.spotify.com/embed/playlist/6l8DIixsHH1E868BKAgw3T"
+          width="100%"
+          height="160"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          style={{ border: 'none', borderRadius: 12, display: 'block' }}
+        />
       </div>
     </div>
   )
@@ -164,51 +231,46 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     alignItems: 'center',
     padding: '48px 16px',
-    fontFamily: "'Segoe UI', system-ui, sans-serif",
+    fontFamily: "'Josefin Sans', sans-serif",
   },
   title: {
-    fontSize: 32,
+    background: '#ffdcea',
+    fontSize: 40,
     fontWeight: 700,
-    color: '#c0392b',
+    color: '#374b1a',
     marginBottom: 6,
     letterSpacing: 2,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontStyle: 'italic',
     color: '#303516',
     marginBottom: 32,
-    marginTop: 0,
+    marginTop: 20,
   },
   timerCard: {
-    background: '#fff', 
+    background: '#ffdcea', 
     borderRadius: 16,
-    padding: '32px 48px',
+    padding: '32px',
     boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
     textAlign: 'center',
     width: '100%',
     maxWidth: 560,
     marginBottom: 24,
   },
-  progressBar: {
-    height: 6,
-    background: '#f0e6e6',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  progressFill: {
-    height: '100%',
-    background: '#c0392b',
-    borderRadius: 4,
-    transition: 'width 1s linear',
+  modeLabel: {
+    fontSize: 25,
+    fontWeight: 700,
+    letterSpacing: 2,
+    textTransform: 'uppercase' as const,
+    marginBottom: 40,
   },
   time: {
-    fontSize: 72,
+    fontSize: 55,
     fontWeight: 300,
     color: '#2c2c2c',
     letterSpacing: 4,
-    marginBottom: 28,
+    marginBottom: 40,
     fontVariantNumeric: 'tabular-nums',
   },
   controls: {
@@ -226,15 +288,15 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'opacity 0.15s',
   },
   btnPrimary: {
-    background: '#c0392b',
+    background: '#617c34',
     color: '#fff',
   },
   btnSecondary: {
-    background: '#f0e6e6',
-    color: '#c0392b',
+    background: '#e8f0d8',
+    color: '#617c34',
   },
   taskCard: {
-    background: '#fff',
+    background: '#f5f0e3',
     borderRadius: 16,
     padding: '28px 32px',
     boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
@@ -257,9 +319,10 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     padding: '10px 14px',
     borderRadius: 8,
-    border: '1.5px solid #e0d4d4',
+    border: '0px solid #dcc5de',
     fontSize: 14,
     outline: 'none',
+    background: '#fafafa',
     color: '#2c2c2c',
   },
   empty: {
@@ -310,7 +373,7 @@ const styles: Record<string, React.CSSProperties> = {
   deleteBtn: {
     background: 'none',
     border: 'none',
-    color: '#c0392b',
+    color: '#9b6fa8',
     cursor: 'pointer',
     fontSize: 14,
     padding: '0 0 0 12px',

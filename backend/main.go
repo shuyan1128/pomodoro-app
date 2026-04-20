@@ -33,7 +33,7 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -72,6 +72,12 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(t)
 
+	case http.MethodDelete:
+		mu.Lock()
+		tasks = nil
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -84,25 +90,51 @@ func handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	mu.Lock()
-	found := false
-	for i, t := range tasks {
-		if t.ID == id {
-			tasks = append(tasks[:i], tasks[i+1:]...)
-			found = true
-			break
+	switch r.Method {
+	case http.MethodDelete:
+		mu.Lock()
+		found := false
+		for i, t := range tasks {
+			if t.ID == id {
+				tasks = append(tasks[:i], tasks[i+1:]...)
+				found = true
+				break
+			}
 		}
+		mu.Unlock()
+		if !found {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodPatch:
+		var body struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Text == "" {
+			http.Error(w, `{"error":"text is required"}`, http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		found := false
+		for i, t := range tasks {
+			if t.ID == id {
+				tasks[i].Text = body.Text
+				found = true
+				break
+			}
+		}
+		mu.Unlock()
+		if !found {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	mu.Unlock()
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleDailyTasks(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +166,12 @@ func handleDailyTasks(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(t)
 
+	case http.MethodDelete:
+		mu.Lock()
+		dailyTasks = nil
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -146,25 +184,51 @@ func handleDailyTaskByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	mu.Lock()
-	found := false
-	for i, t := range dailyTasks {
-		if t.ID == id {
-			dailyTasks = append(dailyTasks[:i], dailyTasks[i+1:]...)
-			found = true
-			break
+	switch r.Method {
+	case http.MethodDelete:
+		mu.Lock()
+		found := false
+		for i, t := range dailyTasks {
+			if t.ID == id {
+				dailyTasks = append(dailyTasks[:i], dailyTasks[i+1:]...)
+				found = true
+				break
+			}
 		}
+		mu.Unlock()
+		if !found {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	case http.MethodPatch:
+		var body struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Text == "" {
+			http.Error(w, `{"error":"text is required"}`, http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		found := false
+		for i, t := range dailyTasks {
+			if t.ID == id {
+				dailyTasks[i].Text = body.Text
+				found = true
+				break
+			}
+		}
+		mu.Unlock()
+		if !found {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	mu.Unlock()
-	if !found {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func main() {

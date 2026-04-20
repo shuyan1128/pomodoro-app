@@ -51,6 +51,8 @@ export default function App() {
   const [dailyInput, setDailyInput] = useState('')
   const [dailyAdding, setDailyAdding] = useState(false)
   const [dragOverFocus, setDragOverFocus] = useState(false)
+  const [editingKey, setEditingKey] = useState<{ list: 'focus' | 'daily'; id: number } | null>(null)
+  const [editingText, setEditingText] = useState('')
   const [exercises, setExercises] = useState<string[]>([])
   const secondsRef = useRef(WORK_SECONDS)
   const modeRef = useRef<'focus' | 'break'>('focus')
@@ -216,6 +218,59 @@ export default function App() {
     }
   }
 
+  function startEdit(list: 'focus' | 'daily', id: number, text: string) {
+    setEditingKey({ list, id })
+    setEditingText(text)
+  }
+
+  async function saveEdit() {
+    if (!editingKey) return
+    const { list, id } = editingKey
+    setEditingKey(null)
+    const text = editingText.trim()
+    if (list === 'focus') {
+      if (!text) {
+        await deleteTask(id)
+      } else {
+        setTasks(t => t.map(task => task.id === id ? { ...task, text } : task))
+        try {
+          await fetch(`${API}/tasks/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          })
+        } catch {}
+      }
+    } else {
+      if (!text) {
+        await deleteDailyTask(id)
+      } else {
+        setDailyTasks(t => t.map(task => task.id === id ? { ...task, text } : task))
+        try {
+          await fetch(`${API}/daily-tasks/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          })
+        } catch {}
+      }
+    }
+  }
+
+  async function clearTasks() {
+    setTasks([])
+    try {
+      await fetch(`${API}/tasks`, { method: 'DELETE' })
+    } catch {}
+  }
+
+  async function clearDailyTasks() {
+    setDailyTasks([])
+    try {
+      await fetch(`${API}/daily-tasks`, { method: 'DELETE' })
+    } catch {}
+  }
+
   async function dropOnFocus(e: React.DragEvent) {
     e.preventDefault()
     setDragOverFocus(false)
@@ -285,7 +340,10 @@ export default function App() {
           onDragLeave={() => setDragOverFocus(false)}
           onDrop={dropOnFocus}
         >
-          <h2 style={styles.sectionTitle}>TO DOS 💪</h2>
+          <div style={styles.sectionHeader}>
+            <h2 style={{ ...styles.sectionTitle, margin: 0 }}>TO DOS 💪</h2>
+            {tasks.length > 0 && <button style={styles.clearBtn} onClick={clearTasks}>Clear all</button>}
+          </div>
           <div style={styles.inputRow}>
             <input
               style={styles.input}
@@ -311,9 +369,23 @@ export default function App() {
                   <button style={{ ...styles.checkBtn, color: task.completed ? '#617c34' : '#ccc' }} onClick={() => toggleTask(task.id)}>
                     ✓
                   </button>
-                  <span style={{ ...styles.taskText, textDecoration: task.completed ? 'line-through' : 'none', color: task.completed ? '#aaa' : '#2c2c2c' }}>
-                    {task.text}
-                  </span>
+                  {editingKey?.list === 'focus' && editingKey.id === task.id ? (
+                    <input
+                      style={styles.editInput}
+                      value={editingText}
+                      autoFocus
+                      onChange={e => setEditingText(e.target.value)}
+                      onBlur={saveEdit}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); else if (e.key === 'Escape') setEditingKey(null) }}
+                    />
+                  ) : (
+                    <span
+                      style={{ ...styles.taskText, textDecoration: task.completed ? 'line-through' : 'none', color: task.completed ? '#aaa' : '#2c2c2c', cursor: 'text' }}
+                      onClick={() => startEdit('focus', task.id, task.text)}
+                    >
+                      {task.text}
+                    </span>
+                  )}
                   <button style={styles.deleteBtn} onClick={() => deleteTask(task.id)}>
                     ✕
                   </button>
@@ -325,7 +397,10 @@ export default function App() {
 
         {/* Daily tasks */}
         <div style={{ ...styles.taskCard, ...styles.column }}>
-          <h2 style={styles.sectionTitle}>DAILY 🌿</h2>
+          <div style={styles.sectionHeader}>
+            <h2 style={{ ...styles.sectionTitle, margin: 0 }}>DAILY 🌿</h2>
+            {dailyTasks.length > 0 && <button style={styles.clearBtn} onClick={clearDailyTasks}>Clear all</button>}
+          </div>
           <div style={styles.inputRow}>
             <input
               style={styles.input}
@@ -353,7 +428,23 @@ export default function App() {
                   draggable
                   onDragStart={e => e.dataTransfer.setData('dailyTaskId', String(task.id))}
                 >
-                  <span style={{ ...styles.taskText, color: '#2c2c2c' }}>{task.text}</span>
+                  {editingKey?.list === 'daily' && editingKey.id === task.id ? (
+                    <input
+                      style={styles.editInput}
+                      value={editingText}
+                      autoFocus
+                      onChange={e => setEditingText(e.target.value)}
+                      onBlur={saveEdit}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); else if (e.key === 'Escape') setEditingKey(null) }}
+                    />
+                  ) : (
+                    <span
+                      style={{ ...styles.taskText, color: '#2c2c2c', cursor: 'text' }}
+                      onClick={() => startEdit('daily', task.id, task.text)}
+                    >
+                      {task.text}
+                    </span>
+                  )}
                   <button style={styles.deleteBtn} onClick={() => deleteDailyTask(task.id)}>
                     ✕
                   </button>
@@ -390,6 +481,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     padding: '48px 16px',
     fontFamily: "'Josefin Sans', sans-serif",
+    colorScheme: 'light' as const,
   },
   title: {
     background: '#ffdcea',
@@ -488,12 +580,39 @@ const styles: Record<string, React.CSSProperties> = {
     outline: '2px dashed #617c34',
     outlineOffset: -2,
   },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 600,
     color: '#2c2c2c',
     marginBottom: 16,
     marginTop: 0,
+  },
+  clearBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#bbb',
+    cursor: 'pointer',
+    fontSize: 13,
+    padding: 0,
+    fontFamily: "'Josefin Sans', sans-serif",
+  },
+  editInput: {
+    flex: 1,
+    minWidth: 0,
+    background: 'none',
+    border: 'none',
+    borderBottom: '1px solid #cdcfcc',
+    outline: 'none',
+    fontSize: 14,
+    color: '#2c2c2c',
+    padding: '0 2px',
+    fontFamily: "'Josefin Sans', sans-serif",
   },
   inputRow: {
     display: 'flex',
@@ -509,8 +628,9 @@ const styles: Record<string, React.CSSProperties> = {
     border: '0px solid #dcc5de',
     fontSize: 14,
     outline: 'none',
-    background: '#fafafa',
+    background: '#e9ecd8',
     color: '#2c2c2c',
+    fontFamily: "'Josefin Sans', sans-serif",
   },
   empty: {
     color: '#aaa',
@@ -531,9 +651,9 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '10px 14px',
-    background: '#faf7f7',
+    background: '#fffdf9',
     borderRadius: 8,
-    border: '1px solid #f0e6e6',
+    border: '0px solid #f0e6e6',
   },
   taskText: {
     fontSize: 14,

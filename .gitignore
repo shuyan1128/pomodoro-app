@@ -1,0 +1,10 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Go binaries and build output
+backend/*.exe
+backend/pomodoro-backend
+
+# OS
+.DS_Store

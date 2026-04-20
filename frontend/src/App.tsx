@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 
 const WORK_SECONDS = 25 * 60
-const API = 'http://localhost:8080'
+const API = 'https://pomodoro-app-qi8p.onrender.com'
 
 interface Task {
   id: number
